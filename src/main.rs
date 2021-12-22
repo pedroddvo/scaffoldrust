@@ -1,5 +1,7 @@
-
+extern crate nom;
+mod lang;
 
 fn main() {
-  println!("Hello")
+  let x = lang::parse::Parser::parse("Hello");
+  println!("{:?}", x);
 }
