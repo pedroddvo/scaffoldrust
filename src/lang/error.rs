@@ -1,28 +1,36 @@
 use nom::error::*;
 use VerboseErrorKind::*;
+use nom_locate::LocatedSpan;
+use std::fmt::Write;
 
-fn slice_range(src_buf: &str, slice: &str) -> (usize, usize) {
-  let start = slice.as_ptr() as usize - src_buf.as_ptr() as usize;
-  let end = start + slice.len();
-  (start, end)
+pub fn report_span(src: &str, span: LocatedSpan<&str>, reason: String) -> String {
+  let mut result = String::new();
+  let line_number = span.location_line();
+  let offset = span.location_offset();
+  let column = span.get_column();
+  
+  // let line_begin = src.as_bytes()[..offset].iter().rev().position(|c| *c == b'\n').map(|u| u).unwrap_or(0);
+  // let line_end = src.as_bytes()[line_begin..].iter().position(|c| *c == b'\n').unwrap_or(src.len());
+  
+
+  write!(&mut result, "{line_number}:{column}: error: {reason}",
+    line_number=line_number,
+    column=column,
+    reason=reason,
+  ).unwrap();
+  
+
+  // write!(&mut result, "\t{}\n", &src[line_begin..line_end]).unwrap();
+  // write!(&mut result, "\t{}^\n", " ".repeat(column-1)).unwrap();
+  result
 }
 
-pub fn report_error(src: &str, verr: VerboseError<&str>) -> String {
-  use std::fmt::Write;
+pub fn report_error(src: &str, verr: VerboseError<LocatedSpan<&str>>) -> String {
 
   let mut result = String::new();
+  println!("{:#?}", verr.errors);
 
   for (i, (slice, kind)) in verr.errors.iter().enumerate() {
-    let (offs_start, offs_end) = slice_range(src, slice); 
-    let prefix = &src.as_bytes()[..offs_start];
-    
-    let line_number = prefix.iter().filter(|c| **c == b'\n').count() + 1;
-    let line_begin = prefix.iter().rev().position(|c| *c == b'\n').map(|pos| offs_start - pos).unwrap_or(0);
-    let line_end = src.as_bytes()[line_begin..].iter().position(|c| *c == b'\n').unwrap_or(src.len());
-    
-    let column = offs_start - line_begin;
-    
-    
     let mut reason = String::new();
 
     match kind {
@@ -37,18 +45,13 @@ pub fn report_error(src: &str, verr: VerboseError<&str>) -> String {
       Context(ctx) => {
         write!(&mut reason, "Expected {:?}\n", ctx).unwrap();
       }
+      Char(c) => {
+        write!(&mut reason, "Expected character {:?}, got {:?}", c, slice.chars().nth(slice.get_column()).unwrap()).unwrap();
+      }
       _ => continue
     }
 
-    write!(&mut result, "{line_number}:{column}: error: {reason}",
-      line_number=line_number,
-      column=column,
-      reason=reason,
-    ).unwrap();
-    
-  
-    write!(&mut result, "\t{}\n", &src[line_begin..line_end]).unwrap();
-    write!(&mut result, "\t{}^\n", " ".repeat(column)).unwrap();
+    write!(&mut result, "{}\n\n", report_span(src, *slice, reason)).unwrap();
   }
   
   result
