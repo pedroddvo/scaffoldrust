@@ -7,3 +7,5 @@ edition = "2018"
 
 [dependencies]
 itertools = "0.10.3"
+llvmenv = "0.3.2"
+llvm-sys = "130.0.1"

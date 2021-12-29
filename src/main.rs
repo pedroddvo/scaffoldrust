@@ -1,17 +1,26 @@
-use lang::error::report_error;
+use lang::error::{report_error, LangErrorKind};
 
 mod lang;
+mod codegen;
 
 
 fn main() {
   let src = std::fs::read_to_string("example.sfd").unwrap();
   
-  let n = lang::tokenize::tokenize(&src);
+  let n = lang::parse::parse(&src);
   match n {
-    Ok(toks) => println!("{:?}", toks),
-    Err(errs) => {
-      for err in errs {
-        println!("{}", report_error(&src, err));
+    Ok(e) => println!("{:#?}", e),
+    Err(err) => {
+      match err.clone().kind {
+        LangErrorKind::Contextual(errs) => {
+          println!("{}", report_error(&src, err));
+          for e in errs {
+            println!("{}", report_error(&src, e));
+          }
+        }
+        _ => {
+          println!("{}", report_error(&src, err))
+        }
       }
     }
   }

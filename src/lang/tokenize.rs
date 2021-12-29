@@ -1,22 +1,33 @@
 use std::{iter::{Peekable, Enumerate}, str::Chars};
-use super::error::{LangError, Span, lang_error, lang_error_fatal, span, span_single, LangErrorKind};
+use super::error::*;
 use itertools::Itertools;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum TokenKind {
   Eof,
+  Newline,
+
   Number,
   Symbol,
+  Type,
   Operator,
   
-  LParen,
-  RParen,
+  KeywordDef,
+  KeywordEnd,
+  
+  Semicolon, // ';'
+  Comma,     // ','
+  Namespace, // '::'
+  Arrow,     // '->'
+  
+  LParen, // '('
+  RParen, // ')'
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Token {
-  kind: TokenKind,
-  span: Span,
+  pub kind: TokenKind,
+  pub span: Span,
 }
 
 
@@ -42,8 +53,13 @@ impl<'a> Tokenizer<'a> {
     self.chars.peek().map(|(_, c)| c.is_whitespace()).unwrap_or(true)
   }
   
-  fn token(&mut self) -> Result<Token, LangError> {
-    while self.peek_eof().1.is_whitespace() { self.next_eof(); }
+  fn ws_not_newline(&mut self) -> bool {
+    let p = self.peek_eof().1;
+    p != '\n' && p.is_whitespace()
+  }
+  
+  fn token(&mut self) -> IResult<Token> {
+    while self.ws_not_newline() { self.next_eof(); }
     let ceof = self.chars.peek();
     if ceof.is_none() {
       return Ok(Token { kind: TokenKind::Eof, span: span_single(self.src.len()) });
@@ -51,10 +67,21 @@ impl<'a> Tokenizer<'a> {
     
     let (start, c) = *ceof.unwrap();
     
+    if c == '\n' {
+      while self.peek_eof().1 == '\n' {
+        self.next_eof();
+      }
+      
+      return Ok(Token { kind: TokenKind::Newline, span: span_single(self.src.len()) });
+    }
+    
+    // IF CHARACTER IS DIGIT
     if c.is_digit(10) {
       while self.peek_eof().1.is_digit(10) { self.next_eof(); }
       let after = self.peek_eof().1;
-      if !after.is_whitespace() && after != '\0' {
+ 
+      // TODO: more than only base 10
+      if after.is_alphabetic() {
         while !self.ws_or_eof() { self.next_eof(); }
         
         let end = self.position();
@@ -64,6 +91,9 @@ impl<'a> Tokenizer<'a> {
       // If the number is a floating point...
       if self.peek_eof().1 == '.' {
         self.chars.next();
+        if !self.peek_eof().1.is_digit(10) {
+          return Err(lang_error("Expected a digit", span_single(self.position())))
+        }
         while self.peek_eof().1.is_digit(10) { self.next_eof(); }
 
         let end = self.position();
@@ -81,17 +111,44 @@ impl<'a> Tokenizer<'a> {
         '?' => { self.next_eof(); },
         _ => {}
       }
+      
 
       let end = self.position();
-      return Ok(Token { kind: TokenKind::Symbol, span: span(start, end)});
+
+      let s = &self.src[start..end];
+      if s.chars().next().unwrap().is_uppercase() {
+        return Ok(Token { kind: TokenKind::Type, span: span(start, end) })
+      }
+      let kind = match s {
+        "def" => TokenKind::KeywordDef,
+        "end" => TokenKind::KeywordEnd,
+        _ => TokenKind::Symbol,
+      };
+      
+      return Ok(Token { kind, span: span(start, end) });
     } else {
       let kind = match self.peek_eof().1 {
+        ';' => TokenKind::Semicolon,
+        ',' => TokenKind::Comma,
         '(' => TokenKind::LParen,
         ')' => TokenKind::RParen,
+        ':' => {
+          match self.peek_eof().1 {
+            ':' => { self.next_eof(); TokenKind::Namespace }
+            _ => TokenKind::Operator,
+          }
+        }
+        '-' => {
+          match self.peek_eof().1 {
+            '>' => { self.next_eof(); TokenKind::Arrow }
+            _ => TokenKind::Operator,
+          }
+        }
         _ => TokenKind::Operator
       };
 
       if kind != TokenKind::Operator {
+        self.next_eof();
         return Ok(Token { kind, span: span(start, self.position())})
       }
       
