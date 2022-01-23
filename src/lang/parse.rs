@@ -3,23 +3,24 @@ use std::{iter::Peekable, slice::Iter};
 use super::tokenize::{Token, TokenKind, tokenize};
 use super::error::*;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ExprKind {
   Number(String),
-  Symbol(String),
+  Symbol(Vec<String>),
    
   BinaryInfix(Box<Expr>, String, Box<Expr>),
 
-  FuncDef(Vec<String>, Vec<(String, String)>, Option<String>, Vec<Expr>), // name, typed parameters, (return type), stmts
+  FuncDef(Vec<String>, Vec<(String, String)>, Option<String>, Vec<Expr>), // namespaced name, typed parameters, (return type), stmts
+  FuncCall(Vec<String>, Vec<Expr>), // namespaced name, args
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Expr {
   pub kind: ExprKind,
   pub span: Span,
 }
 
-struct Parser<'a> {
+pub struct Parser<'a> {
   src: String,
   tokens: Peekable<Iter<'a, Token>>
 }
@@ -70,20 +71,19 @@ impl<'a> Parser<'a> {
   }
   
   fn expect_or(&mut self, kinds: Vec<TokenKind>) -> IResult<Token> {
-    let start = self.peek_no_eof()?.span.start;
+    let span = self.peek_no_eof()?.span;
     for kind in kinds.clone() {
       return match self.expect_no_next(kind) {
         Err(e) => continue,
         Ok(o) => Ok(o)
       }
     }
-    let end = self.peek_no_eof()?.span.end;
      
     let fmt: Vec<String> = kinds.iter().map(|&t| format!("{:?}", t)).collect();
     let res = fmt.iter().enumerate()
       .map(|(n, s)| { if n == fmt.len()-1 { (*s).clone() } else { format!("{} or ", s) }}).collect::<String>();
     
-    Err(lang_error(&format!("Expected {} got {:?}!", res, self.span_str(span(start, end))), span(start, end)))
+    Err(lang_error(&format!("Expected {} got {:?}!", res, self.span_str(span)), span))
   }
   
   fn next_no_eof(&mut self) -> IResult<Token> {
@@ -101,17 +101,32 @@ impl<'a> Parser<'a> {
   }
    
   fn parse_atomic(&mut self) -> IResult<Expr> {
-    let tok = self.next_no_eof()?;
+    while self.peek_no_eof()?.kind == TokenKind::Newline {
+      self.next_no_eof()?;
+    }
+    let tok = self.peek_no_eof()?;
     
     match tok.kind {
-      TokenKind::Number => Ok(Expr { 
-        kind: ExprKind::Number(self.span_str(tok.span).to_string()), 
-        span: tok.span 
-      }),
-      TokenKind::Symbol => Ok(Expr { 
-        kind: ExprKind::Symbol(self.span_str(tok.span).to_string()), 
-        span: tok.span 
-      }),
+      TokenKind::Number => { 
+        self.next_no_eof()?;
+        Ok(Expr { 
+          kind: ExprKind::Number(self.span_str(tok.span).to_string()), 
+          span: tok.span 
+        })
+      },
+      TokenKind::Symbol => {
+        let namespaced = self.parse_namespace_name()?;
+        if self.tokens.peek().is_some() {
+          if self.peek_no_eof()?.kind == TokenKind::LParen {
+            return self.parse_funccall(namespaced, tok.span.start);
+          }
+        }
+
+        Ok(Expr { 
+          kind: ExprKind::Symbol(namespaced), 
+          span: tok.span 
+        })
+      },
       
       _ => Err(lang_error_fatal("Unexpected token", tok.span))
     }
@@ -160,17 +175,21 @@ impl<'a> Parser<'a> {
   fn parse_namespace_name(&mut self) -> IResult<Vec<String>> {
     let mut res = vec![];
     loop {
-      let s = self.expect_or(vec![TokenKind::Type, TokenKind::Symbol])?;
+      let s = self.expect_or(vec![TokenKind::Symbol, TokenKind::Type])?;
       self.next_no_eof()?;
       res.push(self.span_str(s.span).to_string());
-      if let TokenKind::Namespace = self.peek_no_eof()?.kind {
-        if s.kind != TokenKind::Type {
-          return Err(lang_error(&format!("Expected Type, got {:?}.\n - Namespace names start with uppercase letters.", self.span_str(s.span)), s.span))
+      let no = self.tokens.peek();
+      if let Some(&&n) = no {
+        if n.kind == TokenKind::Namespace {
+          self.next_no_eof()?; 
+          continue
+        } else {
+          break;
         }
-        self.next_no_eof()?;
       } else {
         break;
       }
+
     }
     Ok(res)
   } 
@@ -193,6 +212,20 @@ impl<'a> Parser<'a> {
     Ok(res)
   }
   
+  fn parse_arguments(&mut self) -> IResult<Vec<Expr>> {
+    let mut res = vec![];
+    loop {
+      let expr = self.parse_expr()?;
+      res.push(expr);
+      if let TokenKind::Comma = self.peek_no_eof()?.kind {
+        self.next_no_eof()?;
+      } else {
+        break;
+      }
+    }
+    Ok(res)
+  }
+
   fn parse_stmts_till(&mut self, kind: TokenKind) -> IResult<Vec<Expr>> {
     let mut res = vec![];
     let mut errs = vec![];
@@ -215,6 +248,23 @@ impl<'a> Parser<'a> {
     }
     
     Ok(res)
+  }
+  
+  fn parse_funccall(&mut self, name: Vec<String>, start: usize) -> IResult<Expr> {
+    self.expect_next(TokenKind::LParen)?;
+    if self.peek_no_eof()?.kind == TokenKind::RParen {
+      let end = self.next_no_eof()?.span.end;
+      return Ok(Expr {
+        kind: ExprKind::FuncCall(name, vec![]),
+        span: span(start, end)
+      }) 
+    }
+    let args = self.parse_arguments()?;
+    let end = self.expect_next(TokenKind::RParen)?.span.end;
+    return Ok(Expr {
+      kind: ExprKind::FuncCall(name, args),
+      span: span(start, end)
+    }) 
   }
 
   fn parse_funcdef(&mut self) -> IResult<Expr> {
@@ -267,16 +317,20 @@ impl<'a> Parser<'a> {
       match expr {
         Ok(e) => exprs.push(e),
         Err(e) => {
-          errors.push(e);
+          return Err(e)
         },
       }
       
       if self.tokens.peek().unwrap().kind == TokenKind::Eof {
+
         break;
       }
       if errors.is_empty() {
         self.expect_or(vec![TokenKind::Newline, TokenKind::Semicolon])?;
         self.next_no_eof()?;
+      }
+      if self.tokens.peek().unwrap().kind == TokenKind::Eof {
+        break;
       }
       
       

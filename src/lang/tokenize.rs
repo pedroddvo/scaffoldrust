@@ -40,7 +40,7 @@ impl<'a> Tokenizer<'a> {
   fn peek_eof(&mut self) -> (usize, char) {
     self.chars.peek().unwrap_or(&(self.src.len(), '\0')).clone()
   }
-  
+   
   fn next_eof(&mut self) -> (usize, char) {
     self.chars.next().unwrap_or((self.src.len(), '\0'))
   }
@@ -133,14 +133,16 @@ impl<'a> Tokenizer<'a> {
         '(' => TokenKind::LParen,
         ')' => TokenKind::RParen,
         ':' => {
+          self.next_eof();
           match self.peek_eof().1 {
-            ':' => { self.next_eof(); TokenKind::Namespace }
+            ':' => { TokenKind::Namespace }
             _ => TokenKind::Operator,
           }
         }
         '-' => {
+          self.next_eof();
           match self.peek_eof().1 {
-            '>' => { self.next_eof(); TokenKind::Arrow }
+            '>' => { TokenKind::Arrow }
             _ => TokenKind::Operator,
           }
         }
@@ -162,6 +164,7 @@ impl<'a> Tokenizer<'a> {
       
       let end = self.position();
       if end == start { 
+        self.next_eof();
         return Err(lang_error("Bad character(s)", span(start, self.position())))
       }
       
@@ -175,7 +178,6 @@ pub fn tokenize(src: &str) -> Result<Vec<Token>, Vec<LangError>> {
   let mut t = Tokenizer { src: src.to_string(), chars: src.chars().enumerate().peekable() };
   let mut toks = vec![];
   let mut errs = vec![];
-  
   'inf: loop {
     let errtok = t.token();
     

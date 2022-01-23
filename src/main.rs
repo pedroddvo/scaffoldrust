@@ -1,4 +1,6 @@
-use lang::error::{report_error, LangErrorKind};
+use core::mem;
+use codegen::CodeGen;
+use lang::error::{report_error, LangErrorKind, LangError};
 
 mod lang;
 mod codegen;
@@ -7,9 +9,12 @@ mod codegen;
 fn main() {
   let src = std::fs::read_to_string("example.sfd").unwrap();
   
-  let n = lang::parse::parse(&src);
-  match n {
-    Ok(e) => println!("{:#?}", e),
+  let ran = CodeGen::new().compile(&src);
+
+  match ran {
+    Ok(e) => {
+      
+    },
     Err(err) => {
       match err.clone().kind {
         LangErrorKind::Contextual(errs) => {

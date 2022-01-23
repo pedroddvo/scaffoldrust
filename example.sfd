@@ -1,3 +1,6 @@
-def add(x UInt32, y UInt32) -> UInt32
-  x + y
+def test(a Int64, b Int64) -> Int64
+  a + b
+end
+def asd(a Int64, b Int64) -> Int64
+  a + b
 end

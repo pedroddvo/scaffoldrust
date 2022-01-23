@@ -7,5 +7,6 @@ edition = "2018"
 
 [dependencies]
 itertools = "0.10.3"
-llvmenv = "0.3.2"
-llvm-sys = "130.0.1"
+cranelift = "0.80.0"
+cranelift-object = "0.80.0"
+cranelift-module = "0.80.0"
